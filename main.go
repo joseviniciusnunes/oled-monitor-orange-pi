@@ -58,6 +58,13 @@ func main() {
 
 		time.Sleep(1 * time.Second)
 
+		// Se o sinal de parada chegou durante o sleep, sai sem renderizar
+		select {
+		case <-done:
+			return
+		default:
+		}
+
 		if time.Since(lastSwap) >= 3*time.Second {
 			bottomIdx++
 			lastSwap = time.Now()
