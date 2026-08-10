@@ -70,6 +70,16 @@ func (d *Display) Clear() {
 	}
 }
 
+// On liga o painel OLED (Display ON, 0xAF). O conteúdo do framebuffer é mantido.
+func (d *Display) On() error {
+	return d.cmd(0xAF)
+}
+
+// Off desliga o painel OLED (Display OFF, 0xAE) para economizar energia.
+func (d *Display) Off() error {
+	return d.cmd(0xAE)
+}
+
 func (d *Display) Pixel(x, y int, on bool) {
 	if x < 0 || x >= Width || y < 0 || y >= Height {
 		return

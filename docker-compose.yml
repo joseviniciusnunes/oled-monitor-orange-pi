@@ -14,9 +14,12 @@ services:
     # Compartilha o namespace de rede do host para que o IP exibido
     # seja o IP real da placa (e não o do container).
     network_mode: host
-    # Monta o sistema de arquivos raiz do host para exibir o disco REAL
-    # da placa (via readDisk), e não o overlay do container.
+    # Monta o sysfs do host: disco real (em /), socket do Docker (contagem
+    # de containers) e o device de caracteres GPIO (botão p/ ligar/desligar).
     volumes:
       - /:/hostroot:ro
-      # Monta o socket do Docker para contar containers em execução
+      # Mounta o socket do Docker para contar containers em execução
       - /var/run/docker.sock:/var/run/docker.sock
+      # Device de caracteres GPIO para o botão (libgpiod via /dev/gpiochip0).
+      # O privileged:true acima já dá acesso, mas o mount deixa explícito.
+      - /dev/gpiochip0:/dev/gpiochip0:rw

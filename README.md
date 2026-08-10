@@ -174,6 +174,56 @@ oled/
 
 ---
 
+## Botão físico (liga/desliga o display)
+
+O display desliga sozinho após **1 minuto** ligado para economizar energia. Para acendê-lo, pressione um **push button** conectado a um GPIO do Orange Pi (botão puxando o pino para **GND**).
+
+### Configurando
+
+No código (`main.go`), o GPIO já está configurado para **PA7** (offset 7 do chip):
+
+```go
+const gpioBotao = 7 // PA7 -> pino físico 29 do header
+```
+
+O número é o **offset da linha dentro do `gpiochip0`**. No Allwinner H3, o offset é calculado pela fórmula:
+
+```
+offset = (letra do banco - 1) * 32 + pino
+```
+
+Exemplos para o Orange Pi PC Plus (H3):
+- **PA7** → pino físico **29** → `(1-1)*32 + 7 = 7`  ✅ (recomendado)
+- **PA8** → pino físico **31** → `(1-1)*32 + 8 = 8`
+- **PC4** → pino físico **16** → `(3-1)*32 + 4 = 68`
+
+### Conexão
+
+Ligação **simples** (apenas 2 fios, **sem resistor**):
+
+```
+ pino 29 (PA7) ──┐
+                 ├──── push button ──── pino 30 (GND)
+```
+
+- **Push button** entre o **pino físico 29 (PA7)** e **GND (pino 30)**.
+- O display usa a interface de **dispositivo de caracteres** (`/dev/gpiochip0`) via **libgpiod**, que **habilita o pull-up interno por software**. Por isso **não precisa de resistor externo** — o pino já é puxado para HIGH quando o botão está solto, e cai para LOW ao pressionar.
+
+### Como funciona no container
+
+O app usa `/dev/gpiochip0` (device de caracteres), acessível pois o container roda `privileged` / com o device montado:
+
+```yaml
+volumes:
+  - /dev/gpiochip0:/dev/gpiochip0:rw
+```
+
+O código (`gpio.go`) solicita a linha 7 do chip como **entrada com pull-up** (`gpiocdev.AsInput` + `gpiocdev.WithPullUp`) e faz **polling** a cada 10 ms com debounce por estabilidade. A cada pressionada, o display liga e o timer de 1 minuto é reiniciado.
+
+> ⚠️ **Permissão**: acessar `/dev/gpiochip0` exige **root**. No container o processo roda como root, então funciona. Se testar fora do container (`go run .`), rode com `sudo`.
+
+---
+
 ## Solução de problemas
 
 | Erro | Causa | Solução |
