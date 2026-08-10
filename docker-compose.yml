@@ -18,3 +18,5 @@ services:
     # da placa (via readDisk), e não o overlay do container.
     volumes:
       - /:/hostroot:ro
+      # Monta o socket do Docker para contar containers em execução
+      - /var/run/docker.sock:/var/run/docker.sock

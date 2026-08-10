@@ -16,8 +16,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /oled .
 # ---- Estágio final (runtime) ----
 FROM alpine:3.20
 
-# i2c-tools é opcional, mas útil para depuração dentro do container
-RUN apk add --no-cache i2c-tools
+# i2c-tools para depuração + docker CLI para listar containers do host
+RUN apk add --no-cache i2c-tools docker-cli
 
 WORKDIR /app
 
