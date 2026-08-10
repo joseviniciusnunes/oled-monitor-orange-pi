@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	logger "github.com/d2r2/go-logger"
@@ -21,9 +24,32 @@ func main() {
 	}
 	defer oled.Close()
 
+	// Captura sinais de parada (docker stop envia SIGTERM)
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
+
+	done := make(chan struct{})
+
+	go func() {
+		<-sig
+		// Escreve mensagem de parada na tela antes de sair
+		oled.Clear()
+		oled.Text(0, 13, "OLED PARADO")
+		oled.Text(0, 39, time.Now().Format("02/01 15:04:05"))
+		oled.Show()
+		log.Println("OLED parado - mensagem exibida na tela")
+		close(done)
+	}()
+
 	prev, _ := readCPU()
 
 	for {
+
+		select {
+		case <-done:
+			return
+		default:
+		}
 
 		time.Sleep(1 * time.Second)
 
