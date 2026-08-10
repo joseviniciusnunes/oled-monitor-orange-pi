@@ -1,0 +1,16 @@
+services:
+  oled:
+    # Puxa a imagem do registry temporário da sua máquina (192.168.1.3:5000)
+    image: 192.168.1.3:5000/oled:latest
+    container_name: oled
+    restart: unless-stopped
+    # Passa o barramento I2C do host para dentro do container.
+    # Ajuste o número do barramento conforme o seu Orange Pi
+    # (ex.: /dev/i2c-1, /dev/i2c-2, ...).
+    devices:
+      - /dev/i2c-1:/dev/i2c-1
+    # Permissões necessárias para acessar o dispositivo I2C.
+    privileged: true
+    # Compartilha o namespace de rede do host para que o IP exibido
+    # seja o IP real da placa (e não o do container).
+    network_mode: host
