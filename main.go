@@ -34,7 +34,7 @@ func main() {
 		<-sig
 		// Escreve mensagem de parada na tela antes de sair
 		oled.Clear()
-		oled.Text(0, 13, "OLED PARADO")
+		oled.Text(0, 13, "MONITOR PARADO")
 		oled.Text(0, 39, time.Now().Format("02/01 15:04:05"))
 		oled.Show()
 		log.Println("OLED parado - mensagem exibida na tela")
