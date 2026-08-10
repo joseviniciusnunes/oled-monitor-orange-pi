@@ -10,7 +10,7 @@ const (
 )
 
 type Display struct {
-	dev *i2c.I2C
+	dev    *i2c.I2C
 	buffer [Width * Height / 8]byte
 }
 
@@ -41,14 +41,26 @@ func (d *Display) data(data []byte) error {
 }
 
 func (d *Display) Init() error {
+	// Sequência de inicialização completa do SSD1306.
+	// O comando de charge pump (0x8D, 0x14) é essencial para alimentar o
+	// painel OLED — sem ele a tela pode não acender após queda de energia.
 	return d.cmd(
-		0xAE,
-		0x20, 0x00,
-		0xA1,
-		0xC8,
-		0xA6,
-		0xA4,
-		0xAF,
+		0xAE,       // Display OFF
+		0xD5, 0x80, // Clock div (recomendado)
+		0xA8, 0x3F, // Multiplex 1/64
+		0xD3, 0x00, // Display offset 0
+		0x40,       // Start line 0
+		0x8D, 0x14, // Charge pump ON (alimentação do painel)
+		0x20, 0x00, // Memory addressing mode: horizontal
+		0xA1,       // Segment remap (segmento 127 p/ 0)
+		0xC8,       // COM scan direction remapped
+		0xDA, 0x12, // COM pins hardware config
+		0x81, 0xCF, // Contrast
+		0xD9, 0xF1, // Pre-charge period
+		0xDB, 0x40, // VCOMH deselect level
+		0xA4, // Output follows RAM (display on resume)
+		0xA6, // Normal display (não invertido)
+		0xAF, // Display ON
 	)
 }
 
