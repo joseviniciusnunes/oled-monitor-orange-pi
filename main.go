@@ -43,6 +43,11 @@ func main() {
 
 	prev, _ := readCPU()
 
+	// Índice da informação exibida na última linha
+	bottomIdx := 0
+	// Controle para trocar a cada 3 segundos
+	lastSwap := time.Now()
+
 	for {
 
 		select {
@@ -53,20 +58,38 @@ func main() {
 
 		time.Sleep(1 * time.Second)
 
+		if time.Since(lastSwap) >= 3*time.Second {
+			bottomIdx++
+			lastSwap = time.Now()
+		}
+
 		now, _ := readCPU()
 		cpu := cpuUsage(prev, now)
 		prev = now
 
 		ram, _ := readRAM()
 
+		disk, _ := readDisk()
+
 		ip := getIP()
 
 		oled.Clear()
 
 		oled.Text(0, 0, fmt.Sprintf("CPU: %.0f%%", cpu))
-		oled.Text(0, 13, fmt.Sprintf("RAM: %.0f%%", ram))
-		oled.Text(0, 26, "IP: "+ip)
-		oled.Text(0, 39, time.Now().Format("02/01 15:04:05"))
+		oled.Text(72, 0, fmt.Sprintf("RAM: %.0f%%", ram))
+		oled.Text(0, 12, fmt.Sprintf("%.1f/%.1fG %.0f%%", disk.UsedGB, disk.TotalGB, disk.UsedGB*100/disk.TotalGB))
+		oled.Text(0, 24, "IP: "+ip)
+		oled.Text(0, 36, time.Now().Format("02/01 15:04:05"))
+
+		// Linha extra (y=48) rotaciona a cada 3 segundos
+		switch bottomIdx % 3 {
+		case 0:
+			oled.Text(0, 48, "Containers: "+containerCount())
+		case 1:
+			oled.Text(0, 48, "Up Time: "+uptime())
+		case 2:
+			oled.Text(0, 48, "Temp: "+cpuTemp())
+		}
 
 		if err := oled.Show(); err != nil {
 			log.Fatal(err)

@@ -3,9 +3,7 @@ services:
     # Puxa a imagem ARM v7 do GitHub Container Registry (GHCR)
     image: ghcr.io/joseviniciusnunes/oled-monitor-orange-pi:latest
     container_name: oled
-    restart: unless-stopped
-    # Sempre verifica se há uma imagem nova antes de (re)criar o container
-    pull_policy: always
+    restart: always
     # Passa o barramento I2C do host para dentro do container.
     # Ajuste o número do barramento conforme o seu Orange Pi
     # (ex.: /dev/i2c-1, /dev/i2c-2, ...).
@@ -16,3 +14,7 @@ services:
     # Compartilha o namespace de rede do host para que o IP exibido
     # seja o IP real da placa (e não o do container).
     network_mode: host
+    # Monta o sistema de arquivos raiz do host para exibir o disco REAL
+    # da placa (via readDisk), e não o overlay do container.
+    volumes:
+      - /:/hostroot:ro
