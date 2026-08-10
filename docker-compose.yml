@@ -1,7 +1,7 @@
 services:
   oled:
-    # Puxa a imagem do registry temporário da sua máquina (192.168.1.3:5000)
-    image: 192.168.1.3:5000/oled:latest
+    # Puxa a imagem ARM v7 do GitHub Container Registry (GHCR)
+    image: ghcr.io/joseviniciusnunes/oled-monitor-orange-pi:latest
     container_name: oled
     restart: unless-stopped
     # Passa o barramento I2C do host para dentro do container.
