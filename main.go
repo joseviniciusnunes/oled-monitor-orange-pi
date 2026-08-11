@@ -275,6 +275,16 @@ func main() {
 
 	// false = tela inicial (métricas); true = lista de containers.
 	viewContainer := false
+	// containerLoading sinaliza que a lista de containers ainda não foi
+	// carregada nesta exibição (primeira renderização de "container list").
+	// Evita mostrar a lista antiga/em branco enquanto `runningContainers()`
+	// (docker stats + inspect, chamada síncrona) busca os dados.
+	containerLoading := true
+	// homeLoading sinaliza que as métricas da home ainda não foram buscadas
+	// nesta exibição. As chamadas (readCPU/readRAM/readDisk/getIP) são
+	// síncronas e podem demorar; mostra "Loading..." por um tick ao voltar
+	// da lista de containers antes de renderizar as métricas.
+	homeLoading := true
 	// Índice de rolagem da lista de containers.
 	containerOffset := 0
 	lastContainerScroll := time.Now()
@@ -317,27 +327,13 @@ func main() {
 				viewContainer = !viewContainer
 				containerOffset = 0
 				lastContainerScroll = time.Now()
+				// Toda vez que entra na view de containers, mostra "Loading..."
+				// imediatamente enquanto os dados são buscados async. Ao voltar
+				// para a home, mostra o loading das métricas por um tick.
+				containerLoading = viewContainer
+				homeLoading = !viewContainer
 				log.Printf("Botão pressionado -> exibindo %s",
 					map[bool]string{true: "lista de containers", false: "home"}[viewContainer])
-			}
-
-			// Drena todos os toques já enfileirados no canal, para não perder
-			// cliques rápidos consecutivos (ex.: duplo toque alterna duas
-			// vezes, voltando à home).
-		drainButton:
-			for {
-				select {
-				case <-button:
-					if displayOn {
-						viewContainer = !viewContainer
-						containerOffset = 0
-						lastContainerScroll = time.Now()
-						log.Printf("Botão pressionado -> exibindo %s",
-							map[bool]string{true: "lista de containers", false: "home"}[viewContainer])
-					}
-				default:
-					break drainButton
-				}
 			}
 
 			// Liga (ou reinicia o timer de 1 minuto) e sempre mantém a tela ativa.
@@ -386,6 +382,21 @@ func main() {
 
 				// Área da lista de containers (com rolagem automática).
 				if viewContainer {
+					// Primeira renderização: mostra "Loading..." antes de buscar.
+					// A lista é montada no mesmo tick (chamada síncrona), mas o
+					// cabecalho de loading aparece imediatamente ao alternar.
+					if containerLoading {
+						oled.Clear()
+						oled.Text(0, 26, "Loading...")
+						if err := oled.Show(); err != nil {
+							log.Fatal(err)
+						}
+						// Mostrou o loading por este tick; no próximo, carrega a
+						// lista de fato (e zera o flag para não travar aqui).
+						containerLoading = false
+						continue
+					}
+
 					containers := runningContainers()
 					if len(containers) > 0 {
 						containerOffset, lastContainerScroll = drawContainerList(oled, containers, containerOffset, lastContainerScroll, time.Now())
@@ -396,6 +407,19 @@ func main() {
 					if err := oled.Show(); err != nil {
 						log.Fatal(err)
 					}
+					continue
+				}
+
+				// Home: mostra "Loading..." por um tick ao entrar/voltar antes
+				// de buscar as métricas (readCPU/readRAM/readDisk/getIP são
+				// chamadas síncronas que dão delay na renderização).
+				if homeLoading {
+					oled.Clear()
+					oled.Text(0, 26, "Loading...")
+					if err := oled.Show(); err != nil {
+						log.Fatal(err)
+					}
+					homeLoading = false
 					continue
 				}
 

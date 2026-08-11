@@ -22,7 +22,21 @@ type buttonState struct {
 	pressed   bool // botão atualmente pressionado (debounced)
 	longFired bool
 	longTimer *time.Timer
+
+	lastEvent  time.Time // momento do ÚLTIMO evento de qualquer borda (debounce)
+	pressStart time.Time // início da pressão atual (p/ duração mínima do toque curto)
 }
+
+// buttonDebounce é o PERÍODO DE SILÊNCIO exigido entre eventos de qualquer
+// borda para aceitar o próximo. O bounce físico/elétrico do botão gera RAJADAS
+// de bordas (ms); ao esperar a linha ficar em silêncio por este tempo, a rajada
+// inteira é colapsada em UMA transição única, evitando múltiplos onPress.
+const buttonDebounce = 60 * time.Millisecond
+
+// minPressDuration é a duração mínima de uma pressão para contar como "toque
+// curto". Pressões mais curtas que isso (bounce/percusão) são descartadas,
+// evitando toggles indesejados e cliques "enfileirados".
+const minPressDuration = 30 * time.Millisecond
 
 const gpioBase = "/sys/class/gpio"
 
@@ -112,26 +126,43 @@ func (s *buttonState) handleEvent(ev gpiocdev.LineEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Debounce por PERÍODO DE SILÊNCIO: qualquer borda que chegue antes de
+	// buttonDebounce desde o último evento é parte do bounce (rajada). Ignora
+	// sem logar (evita inundar o log com "bounce ignorado" em rajadas).
+	if !s.lastEvent.IsZero() && time.Since(s.lastEvent) < buttonDebounce {
+		return
+	}
+	s.lastEvent = time.Now()
+
 	if ev.Type == gpiocdev.LineEventFallingEdge {
-		// Borda de descida (pressionado). Ignora se já está pressionado
-		// (borda duplicada / bounce rápido).
+		// Borda de descida (pressionado). Ignora se já marcado como pressionado.
 		if s.pressed {
 			return
 		}
 		s.pressed = true
 		s.longFired = false
+		s.pressStart = time.Now()
 
 		// Agenda o toque longo (reboot): se o botão continuar pressionado por
 		// longPressDuration, o callback dispara; o release abaixo o cancela.
 		s.longTimer = time.AfterFunc(longPressDuration, func() {
 			s.mu.Lock()
-			// Só dispara o reboot se o botão ainda estiver pressionado.
+			defer s.mu.Unlock()
+			// Só dispara o reboot se o botão REALMENTE ainda estiver
+			// pressionado. Re-lê o estado físico do pino: se a borda de
+			// release se perdeu (bounce/atraso), cancelamos o reboot.
+			v, err := s.line.Value()
+			if err != nil || v == 1 { // 1 = HIGH = solto
+				s.pressed = false
+				s.longTimer = nil
+				log.Printf("Botão: release perdido - reboot cancelado (GPIO %d)", s.line.Offset())
+				return
+			}
 			if s.pressed {
 				s.longFired = true
 				s.onLongPress()
 			}
 			s.longTimer = nil
-			s.mu.Unlock()
 		})
 		log.Printf("Botão pressionado (GPIO %d)", s.line.Offset())
 		return
@@ -141,6 +172,7 @@ func (s *buttonState) handleEvent(ev gpiocdev.LineEvent) {
 	if !s.pressed {
 		return
 	}
+	pressDur := time.Since(s.pressStart)
 	s.pressed = false
 
 	// Cancela o toque longo pendente: se o botão for solto antes de 4s,
@@ -151,8 +183,9 @@ func (s *buttonState) handleEvent(ev gpiocdev.LineEvent) {
 		s.longTimer = nil
 	}
 
-	// Toque curto: solto antes de completar o toque longo.
-	if !s.longFired {
+	// Toque curto: solto antes de completar o toque longo. Exige duração
+	// mínima (filtra bounce/percusão rápida).
+	if !s.longFired && pressDur >= minPressDuration {
 		log.Printf("Botão solto (toque curto) (GPIO %d)", s.line.Offset())
 		s.onPress()
 	}
