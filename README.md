@@ -233,3 +233,9 @@ O código (`gpio.go`) solicita a linha 7 do chip como **entrada com pull-up** (`
 | `not found` ao puxar | Imagem não enviada ao registry | Rodar `docker buildx build --push` na sua máquina |
 | `exec format error` | Imagem buildada para arquitetura errada (amd64 em vez de arm/v7) | Buildar com `--platform linux/arm/v7` e `--push` (não usar `--load` + `docker push`) |
 | `connection refused` | Registry não está rodando | Subir o registry na sua máquina |
+
+
+## Forçar pull no container
+```
+docker compose up -d --pull always --force-recreate
+```
