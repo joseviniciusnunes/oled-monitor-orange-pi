@@ -45,7 +45,7 @@ func main() {
 
 	log.Println("Tela OLED SSD1306 iniciada!")
 
-	oled, err := ssd1306.Open(1, 0x3C)
+	oled, err := ssd1306.Open(0, 0x3C)
 	if err != nil {
 		log.Fatal(err)
 	}
