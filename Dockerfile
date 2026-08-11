@@ -17,7 +17,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /oled .
 FROM alpine:3.20
 
 # i2c-tools para depuração + docker CLI para listar containers do host
-RUN apk add --no-cache i2c-tools docker-cli
+# + util-linux (fornece nsenter) para reiniciar o host via namespace de PID.
+RUN apk add --no-cache i2c-tools docker-cli util-linux
 
 WORKDIR /app
 

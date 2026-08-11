@@ -11,6 +11,9 @@ services:
       - /dev/i2c-1:/dev/i2c-1
     # Permissões necessárias para acessar o dispositivo I2C.
     privileged: true
+    # Compartilha o namespace de PID do host para que o comando de reboot
+    # (via nsenter -t 1) reinicie o HOST e não apenas o container.
+    pid: host
     # Compartilha o namespace de rede do host para que o IP exibido
     # seja o IP real da placa (e não o do container).
     network_mode: host

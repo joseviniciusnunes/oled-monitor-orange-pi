@@ -43,8 +43,12 @@ func drawBottom(bottomIdx int) string {
 
 // rebootSystem exibe a mensagem de reboot na tela e reinicia o sistema.
 // Deve ser chamado a partir do loop principal (dono do display) para evitar
-// corrida no acesso ao I2C. O container roda com privileged:true, então o
-// comando reboot do host funciona (o PID 1 do host é o alvo).
+// corrida no acesso ao I2C.
+//
+// O container roda com privileged:true e pid:host, então o nsenter -t 1
+// executa o reboot no namespace de PID do HOST (PID 1 = init do host), e não
+// no namespace do container. Sem isso, o `reboot` reiniciaria apenas o
+// container.
 func rebootSystem(oled *ssd1306.Display) {
 	oled.Clear()
 	oled.Text(0, 13, "REBOOT")
@@ -56,7 +60,8 @@ func rebootSystem(oled *ssd1306.Display) {
 	// Pequena pausa para a mensagem aparecer antes de reiniciar.
 	time.Sleep(2 * time.Second)
 
-	cmd := exec.Command("reboot")
+	// Entra nos namespaces do host (PID 1) e executa o reboot do sistema.
+	cmd := exec.Command("nsenter", "-t", "1", "-m", "-u", "-i", "-n", "-p", "reboot")
 	if err := cmd.Run(); err != nil {
 		log.Printf("Falha ao executar reboot: %v", err)
 	}
