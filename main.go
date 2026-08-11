@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -15,11 +16,105 @@ import (
 	"oled/ssd1306"
 )
 
-// mostra a mensagem inicial na tela
+// desenha um retângulo com borda (contorno) no display
+func drawRect(oled *ssd1306.Display, x0, y0, x1, y1 int) {
+	oled.Line(x0, y0, x1, y0, true) // topo
+	oled.Line(x0, y1, x1, y1, true) // base
+	oled.Line(x0, y0, x0, y1, true) // esquerda
+	oled.Line(x1, y0, x1, y1, true) // direita
+}
+
+// desenha um círculo (contorno) com centro (cx, cy) e raio r
+// usando o algoritmo do ponto médio (midpoint circle).
+func drawCircle(oled *ssd1306.Display, cx, cy, r int) {
+	x := r
+	y := 0
+	err := 1 - r
+
+	for x >= y {
+		oled.Pixel(cx+x, cy+y, true)
+		oled.Pixel(cx+y, cy+x, true)
+		oled.Pixel(cx-y, cy+x, true)
+		oled.Pixel(cx-x, cy+y, true)
+		oled.Pixel(cx-x, cy-y, true)
+		oled.Pixel(cx-y, cy-x, true)
+		oled.Pixel(cx+y, cy-x, true)
+		oled.Pixel(cx+x, cy-y, true)
+
+		y++
+		if err < 0 {
+			err += 2*y + 1
+		} else {
+			x--
+			err += 2*(y-x) + 1
+		}
+	}
+}
+
+// desenha um círculo PREENCHIDO com centro (cx, cy) e raio r.
+// Para cada linha horizontal dentro do círculo, liga todos os pixels
+// entre as bordas esquerda e direita.
+func fillCircle(oled *ssd1306.Display, cx, cy, r int) {
+	for y := -r; y <= r; y++ {
+		// Meia-largura da linha na altura y (teorema de Pitágoras)
+		dx := int(float64(r) * math.Sqrt(1-float64(y*y)/float64(r*r)))
+		for x := -dx; x <= dx; x++ {
+			oled.Pixel(cx+x, cy+y, true)
+		}
+	}
+}
+
+// desenha um triângulo PREENCHIDO a partir de 3 vértices.
+// Percorre cada linha horizontal entre o topo e a base e liga os pixels
+// entre as bordas esquerda e direita (interpolação linear).
+func fillTriangle(oled *ssd1306.Display, x0, y0, x1, y1, x2, y2 int) {
+	// Ordena os vértices por y (topo, meio, base)
+	if y0 > y1 {
+		x0, y0, x1, y1 = x1, y1, x0, y0
+	}
+	if y0 > y2 {
+		x0, y0, x2, y2 = x2, y2, x0, y0
+	}
+	if y1 > y2 {
+		x1, y1, x2, y2 = x2, y2, x1, y1
+	}
+
+	// Interpola a borda esquerda e direita para cada linha y
+	for y := y0; y <= y2; y++ {
+		var xa, xb int
+		if y < y1 {
+			// Trecho superior: entre (x0,y0)-(x1,y1) e (x0,y0)-(x2,y2)
+			xa = x0 + (x1-x0)*(y-y0)/(y1-y0+1)
+			xb = x0 + (x2-x0)*(y-y0)/(y2-y0+1)
+		} else {
+			// Trecho inferior: entre (x1,y1)-(x2,y2) e (x0,y0)-(x2,y2)
+			xa = x1 + (x2-x1)*(y-y1)/(y2-y1+1)
+			xb = x0 + (x2-x0)*(y-y0)/(y2-y0+1)
+		}
+		if xa > xb {
+			xa, xb = xb, xa
+		}
+		for x := xa; x <= xb; x++ {
+			oled.Pixel(x, y, true)
+		}
+	}
+}
+
+// desenha o logo da laranja (fruta) preenchido, ocupando toda a tela
+func drawLogo(oled *ssd1306.Display) {
+	// Laranja preenchida, centralizada (um pouco menor para sobrar espaço
+	// para o talo e a folha no topo)
+	fillCircle(oled, 64, 38, 26)
+	// Talo no topo da laranja
+	oled.Line(64, 12, 64, 4, true)
+	// Folha preenchida à direita do talo (bem visível)
+	fillTriangle(oled, 64, 4, 64, 12, 88, 8)
+}
+
+// mostra a mensagem inicial na tela (logo da laranja)
 func splash(oled *ssd1306.Display) {
 	oled.Clear()
-	oled.Text(0, 13, "MONITOR INICIADO")
-	oled.Text(0, 39, time.Now().Format("02/01 15:04:05"))
+	drawLogo(oled)
 	oled.Show()
 }
 
@@ -56,7 +151,7 @@ func rebootSystem(oled *ssd1306.Display, rebooting *atomic.Bool) {
 	rebooting.Store(true)
 
 	oled.Clear()
-	oled.Text(0, 13, "REBOOT")
+	oled.Text(0, 13, "Rebooting...")
 	oled.Text(0, 39, time.Now().Format("02/01 15:04:05"))
 	oled.On()
 	oled.Show()
@@ -103,7 +198,7 @@ func main() {
 		}
 		// Escreve mensagem de parada na tela antes de sair
 		oled.Clear()
-		oled.Text(0, 13, "MONITOR PARADO")
+		oled.Text(0, 13, "No Data")
 		oled.Text(0, 39, time.Now().Format("02/01 15:04:05"))
 		oled.On()
 		oled.Show()
@@ -111,7 +206,10 @@ func main() {
 		close(done)
 	}()
 
-	go splash(oled)
+	// Exibe o logo do Orange Pi por alguns segundos antes de iniciar o loop
+	// de métricas (síncrono, para não ser sobrescrito imediatamente).
+	splash(oled)
+	time.Sleep(3 * time.Second)
 
 	// ---- Controle de energia via botão físico ----
 	// O botão liga o LCD por 1 minuto; depois desliga novamente.
