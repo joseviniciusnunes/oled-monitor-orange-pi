@@ -253,94 +253,114 @@ func main() {
 
 	prev, _ := readCPU()
 
+	// Loop principal dirigido por um TICKER (em vez de time.Sleep), para que o
+	// canal do botão seja servido IMEDIATAMENTE (latência de ms). Antes, o loop
+	// dormia 1s por iteração e só olhava o botão no topo -> o clique apenas era
+	// correspondido na próxima iteração (atraso de até ~1s).
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-button:
+			// O botão é respondido sem esperar o tick de render.
+			// Alterna entre home e lista de containers (e reinicia a rolagem).
 			if displayOn {
-				// Tela já ligada -> alterna entre a home e a lista de
-				// containers (e reinicia a rolagem).
 				viewContainer = !viewContainer
 				containerOffset = 0
 				lastContainerScroll = time.Now()
 				log.Printf("Botão pressionado -> exibindo %s",
 					map[bool]string{true: "lista de containers", false: "home"}[viewContainer])
 			}
+
+			// Drena todos os toques já enfileirados no canal, para não perder
+			// cliques rápidos consecutivos (ex.: duplo toque alterna duas
+			// vezes, voltando à home).
+		drainButton:
+			for {
+				select {
+				case <-button:
+					if displayOn {
+						viewContainer = !viewContainer
+						containerOffset = 0
+						lastContainerScroll = time.Now()
+						log.Printf("Botão pressionado -> exibindo %s",
+							map[bool]string{true: "lista de containers", false: "home"}[viewContainer])
+					}
+				default:
+					break drainButton
+				}
+			}
+
 			// Liga (ou reinicia o timer de 1 minuto) e sempre mantém a tela ativa.
 			displayOn = true
 			screenOnAt = time.Now()
 			oled.On()
 			log.Println("Display ligado pelo botão (1 minuto)")
+
 		case <-reboot:
 			// Toque longo (4s) -> exibe a mensagem e reinicia o sistema.
 			// Executado aqui (loop principal) para garantir que a mensagem
 			// apareça na tela antes do reboot.
 			rebootSystem(oled, &rebooting)
 			return
-		case <-done:
-			return
-		default:
-		}
 
-		// Desliga automaticamente 1 minuto depois do último toque
-		if displayOn && time.Since(screenOnAt) >= 1*time.Minute {
-			displayOn = false
-			showOff(oled)
-			log.Println("Display desligado automaticamente (1 minuto sem pressionar)")
-		}
+		case <-ticker.C:
+			// A cada 1s: desliga automaticamente e renderiza (se ligado).
+			// Independente da view atual (home ou lista de containers).
+			if displayOn && time.Since(screenOnAt) >= 1*time.Minute {
+				displayOn = false
+				showOff(oled)
+				log.Println("Display desligado automaticamente (1 minuto sem pressionar)")
+			}
 
-		// Se o botão for pressionado durante o sleep, sai sem renderizar
-		select {
-		case <-done:
-			return
-		default:
-		}
-
-		// Só atualiza as métricas com a tela ligada
-		if displayOn {
-			// Área da lista de containers (com rolagem automática).
-			if viewContainer {
-				containers := runningContainers()
-				if len(containers) > 0 {
-					containerOffset, lastContainerScroll = drawContainerList(oled, containers, containerOffset, lastContainerScroll, time.Now())
-				} else {
-					oled.Clear()
-					oled.Text(0, 26, "No containers")
+			// Só atualiza as métricas com a tela ligada.
+			if displayOn {
+				// Área da lista de containers (com rolagem automática).
+				if viewContainer {
+					containers := runningContainers()
+					if len(containers) > 0 {
+						containerOffset, lastContainerScroll = drawContainerList(oled, containers, containerOffset, lastContainerScroll, time.Now())
+					} else {
+						oled.Clear()
+						oled.Text(0, 26, "No containers")
+					}
+					if err := oled.Show(); err != nil {
+						log.Fatal(err)
+					}
+					continue
 				}
+
+				now, _ := readCPU()
+				cpu := cpuUsage(prev, now)
+				prev = now
+
+				ram, _ := readRAM()
+				disk, _ := readDisk()
+				ip := getIP()
+
+				if time.Since(lastSwap) >= 3*time.Second {
+					bottomIdx++
+					lastSwap = time.Now()
+				}
+
+				oled.Clear()
+				oled.Text(0, 0, fmt.Sprintf("CPU: %.0f%%", cpu))
+				oled.Text(72, 0, fmt.Sprintf("RAM: %.0f%%", ram))
+				oled.Text(0, 12, fmt.Sprintf("%.1f/%.1fG %.0f%%", disk.UsedGB, disk.TotalGB, disk.UsedGB*100/disk.TotalGB))
+				oled.Text(0, 24, "IP: "+ip)
+				oled.Text(0, 36, time.Now().Format("02/01 15:04:05"))
+
+				// Linha extra (y=48) rotaciona a cada 3 segundos
+				oled.Text(0, 48, drawBottom(bottomIdx))
+
 				if err := oled.Show(); err != nil {
 					log.Fatal(err)
 				}
-				time.Sleep(1 * time.Second)
-				continue
 			}
 
-			now, _ := readCPU()
-			cpu := cpuUsage(prev, now)
-			prev = now
-
-			ram, _ := readRAM()
-			disk, _ := readDisk()
-			ip := getIP()
-
-			if time.Since(lastSwap) >= 3*time.Second {
-				bottomIdx++
-				lastSwap = time.Now()
-			}
-
-			oled.Clear()
-			oled.Text(0, 0, fmt.Sprintf("CPU: %.0f%%", cpu))
-			oled.Text(72, 0, fmt.Sprintf("RAM: %.0f%%", ram))
-			oled.Text(0, 12, fmt.Sprintf("%.1f/%.1fG %.0f%%", disk.UsedGB, disk.TotalGB, disk.UsedGB*100/disk.TotalGB))
-			oled.Text(0, 24, "IP: "+ip)
-			oled.Text(0, 36, time.Now().Format("02/01 15:04:05"))
-
-			// Linha extra (y=48) rotaciona a cada 3 segundos
-			oled.Text(0, 48, drawBottom(bottomIdx))
-
-			if err := oled.Show(); err != nil {
-				log.Fatal(err)
-			}
+		case <-done:
+			return
 		}
-
-		time.Sleep(1 * time.Second)
 	}
 }
