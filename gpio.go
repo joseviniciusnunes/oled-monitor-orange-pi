@@ -30,14 +30,19 @@ func tryReleaseSysfs(offset int) {
 }
 
 // watchButton monitors a push button connected to the given GPIO offset
-// (offset dentro do chip) and calls onPress() whenever it is pressed.
+// (offset dentro do chip).
+//
+//   - onPress(): chamado em um toque curto (botão pressionado e solto em
+//     menos de longPressDuration).
+//   - onLongPress(): chamado quando o botão é segurado por longPressDuration
+//     ou mais (usado para reboot).
 //
 // Usa a interface de dispositivo de caracteres (/dev/gpiochip0) via libgpiod,
 // que SUPORTA pull-up interno por software (resolve o pino "flutuando" sem
 // resistor externo). Requer kernel Linux >= 5.5 (padrão no Armbian moderno).
 //
 // O Orange Pi PC Plus expõe o PA7 como offset 7 do gpiochip0.
-func watchButton(offset int, onPress func()) {
+func watchButton(offset int, onPress func(), onLongPress func()) {
 	const chipName = "gpiochip0"
 
 	// Liberta o pino do sysfs antes de usar libgpiod (evita "device busy").
@@ -62,9 +67,15 @@ func watchButton(offset int, onPress func()) {
 	// estado permanece ESTÁVEL por estabilidadeMin (mascara ruído/rebote).
 	const estabilidadeMin = 100 * time.Millisecond
 
+	// Tempo de pressionamento para considerar "toque longo" (reboot).
+	const longPressDuration = 4 * time.Second
+
 	var prevLow = true
 	lastChange := time.Now()
 	var pending bool
+	var pressed bool // true somente após o debounce confirmar o pressionamento
+	var pressedAt time.Time
+	var longFired bool
 
 	for {
 		val, err := line.Value()
@@ -81,11 +92,26 @@ func watchButton(offset int, onPress func()) {
 			if pending && time.Since(lastChange) >= estabilidadeMin {
 				if low {
 					log.Printf("Botão pressionado (GPIO %d)", offset)
-					onPress()
+					pressed = true
+					pressedAt = time.Now()
+					longFired = false
 				} else {
 					log.Printf("Botão solto (GPIO %d)", offset)
+					// Toque curto: solto antes de completar o toque longo.
+					if pressed && !longFired {
+						onPress()
+					}
+					pressed = false
 				}
 				pending = false
+			}
+
+			// Enquanto segurado (já confirmado pelo debounce), dispara o
+			// toque longo (reboot) uma única vez.
+			if low && pressed && !longFired && time.Since(pressedAt) >= longPressDuration {
+				longFired = true
+				log.Printf("Botão segurado por %s (GPIO %d) -> reboot", longPressDuration, offset)
+				onLongPress()
 			}
 		} else {
 			// Estado mudou: inicia/atualiza a janela de estabilização.

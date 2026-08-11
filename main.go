@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -37,6 +38,27 @@ func drawBottom(bottomIdx int) string {
 		return "Up Time: " + uptime()
 	default:
 		return "Temp: " + cpuTemp()
+	}
+}
+
+// rebootSystem exibe a mensagem de reboot na tela e reinicia o sistema.
+// Deve ser chamado a partir do loop principal (dono do display) para evitar
+// corrida no acesso ao I2C. O container roda com privileged:true, então o
+// comando reboot do host funciona (o PID 1 do host é o alvo).
+func rebootSystem(oled *ssd1306.Display) {
+	oled.Clear()
+	oled.Text(0, 13, "REBOOT")
+	oled.Text(0, 39, time.Now().Format("02/01 15:04:05"))
+	oled.On()
+	oled.Show()
+	log.Println("Reboot solicitado - mensagem exibida na tela")
+
+	// Pequena pausa para a mensagem aparecer antes de reiniciar.
+	time.Sleep(2 * time.Second)
+
+	cmd := exec.Command("reboot")
+	if err := cmd.Run(); err != nil {
+		log.Printf("Falha ao executar reboot: %v", err)
 	}
 }
 
@@ -80,9 +102,18 @@ func main() {
 	// Canal BUFFERED (cap 1): o aperto pode acontecer durante o time.Sleep do
 	// loop principal; sem buffer ele seria descartado e a tela não ligaria.
 	button := make(chan struct{}, 1)
+	// Canal para sinalizar reboot (toque longo). O reboot é executado no loop
+	// principal, que é o dono do display, para evitar corrida no acesso ao I2C.
+	reboot := make(chan struct{}, 1)
 	go watchButton(gpioBotao, func() {
 		select {
 		case button <- struct{}{}:
+		default:
+		}
+	}, func() {
+		// Toque longo (4s) -> reinicia o sistema.
+		select {
+		case reboot <- struct{}{}:
 		default:
 		}
 	})
@@ -106,6 +137,12 @@ func main() {
 			screenOnAt = time.Now()
 			oled.On()
 			log.Println("Display ligado pelo botão (1 minuto)")
+		case <-reboot:
+			// Toque longo (4s) -> exibe a mensagem e reinicia o sistema.
+			// Executado aqui (loop principal) para garantir que a mensagem
+			// apareça na tela antes do reboot.
+			rebootSystem(oled)
+			return
 		case <-done:
 			return
 		default:
