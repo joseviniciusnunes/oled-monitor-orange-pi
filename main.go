@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -49,7 +50,11 @@ func drawBottom(bottomIdx int) string {
 // executa o reboot no namespace de PID do HOST (PID 1 = init do host), e não
 // no namespace do container. Sem isso, o `reboot` reiniciaria apenas o
 // container.
-func rebootSystem(oled *ssd1306.Display) {
+func rebootSystem(oled *ssd1306.Display, rebooting *atomic.Bool) {
+	// Marca que um reboot está em andamento para que o signal handler
+	// (SIGTERM ao desligar o host) não sobrescreva a mensagem "REBOOT".
+	rebooting.Store(true)
+
 	oled.Clear()
 	oled.Text(0, 13, "REBOOT")
 	oled.Text(0, 39, time.Now().Format("02/01 15:04:05"))
@@ -84,8 +89,18 @@ func main() {
 
 	done := make(chan struct{})
 
+	// Flag atômico: quando true, um reboot está em andamento e a tela não deve
+	// ser sobrescrita pela mensagem de parada (MONITOR PARADO).
+	var rebooting atomic.Bool
+
 	go func() {
 		<-sig
+		// Se um reboot está em andamento, não sobrescreve a mensagem "REBOOT".
+		if rebooting.Load() {
+			log.Println("OLED parado durante reboot - mantendo mensagem REBOOT na tela")
+			close(done)
+			return
+		}
 		// Escreve mensagem de parada na tela antes de sair
 		oled.Clear()
 		oled.Text(0, 13, "MONITOR PARADO")
@@ -146,7 +161,7 @@ func main() {
 			// Toque longo (4s) -> exibe a mensagem e reinicia o sistema.
 			// Executado aqui (loop principal) para garantir que a mensagem
 			// apareça na tela antes do reboot.
-			rebootSystem(oled)
+			rebootSystem(oled, &rebooting)
 			return
 		case <-done:
 			return
