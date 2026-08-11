@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -172,6 +173,19 @@ func main() {
 
 	log.Println("Tela OLED SSD1306 iniciada!")
 
+	// ---- Configurações de monitoramento de restarts ----
+	// RESTART_CHECK_ENABLED: ativa/desativa a verificação de containers
+	// reiniciados (default: ativo, controlado pelo docker-compose).
+	// RESTART_CHECK_INTERVAL_SECONDS: intervalo entre as verificações
+	// (default: 30s).
+	restartCheckEnabled := os.Getenv("RESTART_CHECK_ENABLED") != "false"
+	restartCheckInterval := 30 * time.Second
+	if v := os.Getenv("RESTART_CHECK_INTERVAL_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			restartCheckInterval = time.Duration(n) * time.Second
+		}
+	}
+
 	oled, err := ssd1306.Open(0, 0x3C)
 	if err != nil {
 		log.Fatal(err)
@@ -187,6 +201,19 @@ func main() {
 	// Flag atômico: quando true, um reboot está em andamento e a tela não deve
 	// ser sobrescrita pela mensagem de parada (MONITOR PARADO).
 	var rebooting atomic.Bool
+
+	// Canal de alerta quando um container reiniciou (vem do monitor em segundo
+	// plano, que roda mesmo com a tela apagada).
+	restartAlert := make(chan containerInfo, 1)
+	// Canal para dispensar o alerta (aperto do botão) e retomar a checagem.
+	resumeCheck := make(chan struct{}, 1)
+
+	if restartCheckEnabled {
+		log.Printf("Monitoramento de restarts ATIVO - verificação a cada %s", restartCheckInterval)
+		go watchContainerRestarts(restartCheckInterval, resumeCheck, done, restartAlert)
+	} else {
+		log.Println("Monitoramento de restarts DESATIVADO (RESTART_CHECK_ENABLED=false)")
+	}
 
 	go func() {
 		<-sig
@@ -240,6 +267,12 @@ func main() {
 	displayOn := true        // começa ligado
 	screenOnAt := time.Now() // referência para marcar o início da sessão
 
+	// Alerta de container reiniciado: quando true, a tela fica LIGADA com o
+	// aviso "Problem" até alguém dispensar manualmente (aperto do botão).
+	problemActive := false
+	var problemContainer containerInfo
+	problemTime := time.Now()
+
 	// false = tela inicial (métricas); true = lista de containers.
 	viewContainer := false
 	// Índice de rolagem da lista de containers.
@@ -263,6 +296,21 @@ func main() {
 	for {
 		select {
 		case <-button:
+			// Se há um alerta de restart pendente, dispensá-lo antes de
+			// qualquer outra ação (retoma o monitoramento após a correção).
+			if problemActive {
+				problemActive = false
+				viewContainer = false
+				containerOffset = 0
+				lastContainerScroll = time.Now()
+				lastSwap = time.Now()
+				select {
+				case resumeCheck <- struct{}{}:
+				default:
+				}
+				log.Println("Alerta de restart dispensado - monitoramento retomado")
+			}
+
 			// O botão é respondido sem esperar o tick de render.
 			// Alterna entre home e lista de containers (e reinicia a rolagem).
 			if displayOn {
@@ -305,10 +353,21 @@ func main() {
 			rebootSystem(oled, &rebooting)
 			return
 
+		case c := <-restartAlert:
+			// Um container reiniciou: liga a tela (mesmo que estivesse apagada)
+			// e a mantém acesa com o aviso "Problem" até verificação manual.
+			problemActive = true
+			problemContainer = c
+			problemTime = time.Now()
+			displayOn = true
+			oled.On()
+			log.Printf("ALERTA: container %s reiniciou (R%d) - tela travada", c.Name, c.Restart)
+
 		case <-ticker.C:
 			// A cada 1s: desliga automaticamente e renderiza (se ligado).
 			// Independente da view atual (home ou lista de containers).
-			if displayOn && time.Since(screenOnAt) >= 1*time.Minute {
+			// Se há um alerta de restart, NUNCA desliga (fica para verificação).
+			if displayOn && !problemActive && time.Since(screenOnAt) >= 1*time.Minute {
 				displayOn = false
 				showOff(oled)
 				log.Println("Display desligado automaticamente (1 minuto sem pressionar)")
@@ -316,6 +375,15 @@ func main() {
 
 			// Só atualiza as métricas com a tela ligada.
 			if displayOn {
+				// Alerta de restart tem prioridade sobre as demais telas.
+				if problemActive {
+					drawProblem(oled, problemContainer, problemTime)
+					if err := oled.Show(); err != nil {
+						log.Fatal(err)
+					}
+					continue
+				}
+
 				// Área da lista de containers (com rolagem automática).
 				if viewContainer {
 					containers := runningContainers()

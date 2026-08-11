@@ -4,6 +4,12 @@ services:
     image: ghcr.io/joseviniciusnunes/oled-monitor-orange-pi:latest
     container_name: oled
     restart: always
+    # Monitora restarts de containers do host (via socket Docker), a cada 30s.
+    # Ativo por padrão. A tela fica ligada com aviso "Problem" até verificação
+    # manual. Desative com RESTART_CHECK_ENABLED=false.
+    environment:
+      - RESTART_CHECK_ENABLED=${RESTART_CHECK_ENABLED:-true}
+      - RESTART_CHECK_INTERVAL_SECONDS=${RESTART_CHECK_INTERVAL_SECONDS:-1800}
     # Passa o barramento I2C do host para dentro do container.
     # Ajuste o número do barramento conforme o seu Orange Pi
     # (ex.: /dev/i2c-1, /dev/i2c-2, ...).
