@@ -240,6 +240,12 @@ func main() {
 	displayOn := true        // começa ligado
 	screenOnAt := time.Now() // referência para marcar o início da sessão
 
+	// false = tela inicial (métricas); true = lista de containers.
+	viewContainer := false
+	// Índice de rolagem da lista de containers.
+	containerOffset := 0
+	lastContainerScroll := time.Now()
+
 	// Índice da informação exibida na última linha
 	bottomIdx := 0
 	// Controle para trocar a cada 3 segundos
@@ -250,7 +256,16 @@ func main() {
 	for {
 		select {
 		case <-button:
-			// Botão pressionado -> liga (ou reinicia o timer de 1 minuto)
+			if displayOn {
+				// Tela já ligada -> alterna entre a home e a lista de
+				// containers (e reinicia a rolagem).
+				viewContainer = !viewContainer
+				containerOffset = 0
+				lastContainerScroll = time.Now()
+				log.Printf("Botão pressionado -> exibindo %s",
+					map[bool]string{true: "lista de containers", false: "home"}[viewContainer])
+			}
+			// Liga (ou reinicia o timer de 1 minuto) e sempre mantém a tela ativa.
 			displayOn = true
 			screenOnAt = time.Now()
 			oled.On()
@@ -282,6 +297,22 @@ func main() {
 
 		// Só atualiza as métricas com a tela ligada
 		if displayOn {
+			// Área da lista de containers (com rolagem automática).
+			if viewContainer {
+				containers := runningContainers()
+				if len(containers) > 0 {
+					containerOffset, lastContainerScroll = drawContainerList(oled, containers, containerOffset, lastContainerScroll, time.Now())
+				} else {
+					oled.Clear()
+					oled.Text(0, 26, "No containers")
+				}
+				if err := oled.Show(); err != nil {
+					log.Fatal(err)
+				}
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
 			now, _ := readCPU()
 			cpu := cpuUsage(prev, now)
 			prev = now
